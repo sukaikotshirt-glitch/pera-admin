@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Webpera · Admin Console | Secure User Management</title>
+    <title>Webpera · Admin Console | Full User Control</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
     <style>
@@ -26,7 +26,7 @@
 
         .glass-panel {
             width: 100%;
-            max-width: 1500px;
+            max-width: 1550px;
             background: rgba(255,255,255,0.75);
             backdrop-filter: blur(16px) saturate(180%);
             border-radius: 2.5rem;
@@ -316,7 +316,7 @@
         .modal-container {
             background: white;
             border-radius: 2rem;
-            max-width: 520px;
+            max-width: 540px;
             width: 90%;
             padding: 2rem;
             box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4);
@@ -407,7 +407,7 @@
         .user-table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 1100px;
+            min-width: 1200px;
         }
 
         .user-table th {
@@ -463,12 +463,12 @@
             flex-wrap: wrap;
         }
 
-        .btn-block, .btn-unblock, .btn-delete, .btn-edit-credits {
+        .btn-block, .btn-unblock, .btn-delete, .btn-edit-credits, .btn-reset-daily {
             border: none;
             padding: 0.5rem 1.2rem;
             border-radius: 40px;
             font-weight: 600;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             display: inline-flex;
             align-items: center;
             gap: 6px;
@@ -494,7 +494,17 @@
         .btn-edit-credits {
             background: #e0f2fe;
             color: #0369a1;
-            margin-left: 8px;
+            margin-left: 6px;
+        }
+        
+        .btn-reset-daily {
+            background: #fff7e5;
+            color: #b45309;
+            border: 1px solid #fed7aa;
+        }
+        
+        .btn-reset-daily:hover {
+            background: #ffedd5;
         }
 
         .btn-edit-credits:hover {
@@ -599,7 +609,7 @@
             </div>
             <div class="logo-text">
                 <h1>WEBPERA</h1>
-                <span>administration console · block enforcement · daily auto reset</span>
+                <span>administration · block enforcement · daily reset</span>
             </div>
         </div>
         <div style="display: flex; gap: 10px;">
@@ -617,7 +627,7 @@
             <div class="login-card">
                 <div class="login-header">
                     <h3>admin access</h3>
-                    <p>permanent session · full control</p>
+                    <p>permanent session · full user control</p>
                 </div>
                 <div class="input-group-modern">
                     <i class="fas fa-envelope"></i>
@@ -650,7 +660,7 @@
                         <input type="text" id="searchInput" placeholder="Search by email or UID..." onkeyup="filterUsers()">
                     </div>
                     <button class="create-user-btn" onclick="openCreateUserModal()">
-                        <i class="fas fa-user-plus"></i> Create New User
+                        <i class="fas fa-user-plus"></i> Create User
                     </button>
                     <button class="refresh-btn" onclick="loadUsers()">
                         <i class="fas fa-sync-alt"></i> refresh
@@ -670,7 +680,7 @@
                 </table>
             </div>
             <div class="footer-note">
-                <i class="fas fa-sync-alt"></i> Daily limit resets every 24h automatically (UTC). Blocked users cannot access any feature until unblocked.
+                <i class="fas fa-calendar-day"></i> Daily usage resets automatically every 24h (UTC). Click "Reset daily" to manually reset dailyUsed counter anytime.
             </div>
         </div>
     </div>
@@ -696,15 +706,12 @@
     let refreshInterval = null;
     let allUsersData = [];
 
-    // ----- DAILY AUTO RESET (Cloud Firestore + local trigger on load) -----
-    // This function checks lastResetDate and resets dailyUsed if last reset > 24h ago.
-    // It is called during loadUsers and also can be triggered periodically.
-    async function applyDailyResetIfNeeded(userDoc, userId, userData) {
+    // Auto daily reset: checks lastDailyReset and resets dailyUsed if older than 24h
+    async function applyDailyResetIfNeeded(userId, userData) {
         const now = Date.now();
-        let lastReset = userData.lastDailyReset ? userData.lastDailyReset.toMillis ? userData.lastDailyReset.toMillis() : userData.lastDailyReset : 0;
+        let lastReset = userData.lastDailyReset ? (userData.lastDailyReset.toMillis ? userData.lastDailyReset.toMillis() : userData.lastDailyReset) : 0;
         const oneDay = 24 * 60 * 60 * 1000;
         if (!lastReset || (now - lastReset) >= oneDay) {
-            // reset daily usage and update timestamp
             await db.collection("users").doc(userId).update({
                 dailyUsed: 0,
                 lastDailyReset: firebase.firestore.FieldValue.serverTimestamp()
@@ -714,11 +721,22 @@
         return false;
     }
 
-    // Admin block enforcement: if user.blocked === true, any app logic (outside admin) must reject access.
-    // For admin panel we just show blocked status & ensure that blocked users cannot be used until unblocked.
-    // The actual enforcement is on backend/frontend app, but admin shows correct blocked flag.
-    
-    // Load users with enhanced fields: daily auto-reset applied, active sessions via custom claim (simulated: last login devices)
+    // MANUAL RESET DAILY USAGE (new feature)
+    window.resetDailyUsage = async function(userId, userEmail) {
+        if (!confirm(`Reset daily usage for ${userEmail}?\nThis will set "daily used" back to 0 and update reset timestamp.`)) return;
+        try {
+            await db.collection("users").doc(userId).update({
+                dailyUsed: 0,
+                lastDailyReset: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await loadUsers();
+            showToast(`Daily usage reset for ${userEmail}`, "success");
+        } catch (err) {
+            showToast("Reset failed: " + err.message, "error");
+        }
+    };
+
+    // Load users with daily reset applied + active sessions display
     window.loadUsers = async function() {
         const tbody = document.getElementById("userTable");
         tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem;"><i class="fas fa-spinner fa-pulse"></i> fetching users...</td></tr>`;
@@ -726,20 +744,15 @@
             if (!auth.currentUser) throw new Error("Session expired");
             const snapshot = await db.collection("users").get();
             let usersArray = [];
-            // apply daily reset for each user before rendering
             for (const doc of snapshot.docs) {
                 let data = doc.data();
                 const userId = doc.id;
-                const wasReset = await applyDailyResetIfNeeded(doc, userId, data);
-                if (wasReset) {
-                    // refresh data after reset
-                    const updatedDoc = await db.collection("users").doc(userId).get();
-                    data = updatedDoc.data();
-                }
-                // Determine active device sessions: We will track a separate subcollection "sessions" to count unique devices.
-                // For simplicity but robust: we store an array of session tokens or use login timestamp per device. We'll implement sessions count based on 'activeSessions' field managed at login.
-                // Admin panel will read 'activeSessionCount' from user doc (maintained by backend logic, default 0)
-                let activeSessions = data.activeSessionCount || 0;
+                // auto reset before reading
+                await applyDailyResetIfNeeded(userId, data);
+                // fetch fresh data after potential reset
+                const freshDoc = await db.collection("users").doc(userId).get();
+                data = freshDoc.data();
+                const activeSessions = data.activeSessionCount || 0;
                 usersArray.push({
                     id: userId,
                     email: data.email || "—",
@@ -768,21 +781,30 @@
             const statusText = isBlocked ? "BLOCKED" : "ACTIVE";
             const statusIcon = isBlocked ? "fa-ban" : "fa-check-circle";
             const sessionIcon = user.activeSessions > 0 ? "fa-wifi" : "fa-mobile-alt";
-            html += `<tr>
-                <td><span class="uid-cell"><i class="fas fa-fingerprint"></i> ${user.id.substring(0,12)}..</span></td>
-                <td><i class="fas fa-envelope"></i> ${escapeHtml(user.email)}</td>
-                <td><span class="numeric-badge"><i class="fas fa-coins"></i> ${user.credits}</span> <button class="btn-edit-credits" onclick="openEditCreditsModal('${user.id}', '${escapeHtml(user.email)}', ${user.credits})"><i class="fas fa-edit"></i> Edit</button></td>
-                <td><span class="numeric-badge"><i class="fas fa-chart-line"></i> ${user.dailyUsed}</span></td>
-                <td><span class="numeric-badge"><i class="fas fa-gauge-high"></i> ${user.dailyLimit}</span></td>
-                <td><span class="login-count-badge"><i class="fas fa-sign-in-alt"></i> ${user.loginCount}</span></td>
-                <td><span class="session-device-badge"><i class="fas ${sessionIcon}"></i> ${user.activeSessions} device${user.activeSessions !== 1 ? 's' : ''}</span></td>
-                <td><span class="badge-status ${statusClass}"><i class="fas ${statusIcon}"></i> ${statusText}</span></td>
-                <td><div class="action-group">
-                    <button class="btn-block" onclick="blockUser('${user.id}')"><i class="fas fa-lock"></i> Block</button>
-                    <button class="btn-unblock" onclick="unblockUser('${user.id}')"><i class="fas fa-lock-open"></i> Unblock</button>
-                    <button class="btn-delete" onclick="deleteUser('${user.id}')"><i class="fas fa-trash"></i> Delete</button>
-                </div></td>
-            </tr>`;
+            html += `
+                <tr>
+                    <td><span class="uid-cell"><i class="fas fa-fingerprint"></i> ${user.id.substring(0,12)}..</span></td>
+                    <td><i class="fas fa-envelope"></i> ${escapeHtml(user.email)}</td>
+                    <td>
+                        <span class="numeric-badge"><i class="fas fa-coins"></i> ${user.credits}</span>
+                        <button class="btn-edit-credits" onclick="openEditCreditsModal('${user.id}', '${escapeHtml(user.email)}', ${user.credits})"><i class="fas fa-edit"></i> Edit</button>
+                     </td>
+                    <td>
+                        <span class="numeric-badge"><i class="fas fa-chart-line"></i> ${user.dailyUsed} / ${user.dailyLimit}</span>
+                        <button class="btn-reset-daily" onclick="resetDailyUsage('${user.id}', '${escapeHtml(user.email)}')" title="Reset daily used counter">
+                            <i class="fas fa-rotate-left"></i> Reset daily
+                        </button>
+                     </td>
+                    <td><span class="numeric-badge"><i class="fas fa-gauge-high"></i> ${user.dailyLimit}</span></td>
+                    <td><span class="login-count-badge"><i class="fas fa-sign-in-alt"></i> ${user.loginCount}</span></td>
+                    <td><span class="session-device-badge"><i class="fas ${sessionIcon}"></i> ${user.activeSessions} device${user.activeSessions !== 1 ? 's' : ''}</span></td>
+                    <td><span class="badge-status ${statusClass}"><i class="fas ${statusIcon}"></i> ${statusText}</span></td>
+                    <td><div class="action-group">
+                        <button class="btn-block" onclick="blockUser('${user.id}')"><i class="fas fa-lock"></i> Block</button>
+                        <button class="btn-unblock" onclick="unblockUser('${user.id}')"><i class="fas fa-lock-open"></i> Unblock</button>
+                        <button class="btn-delete" onclick="deleteUser('${user.id}')"><i class="fas fa-trash"></i> Delete</button>
+                    </div></td>
+                </tr>`;
         });
         tbody.innerHTML = html;
     }
@@ -790,16 +812,16 @@
     function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
     
     window.blockUser = async function(uid) {
-        if (!confirm(`⚠️ Block user? After block, user will be denied access instantly until admin unblocks.`)) return;
+        if (!confirm(`⚠️ BLOCK user? After block, this user account will be denied access immediately until unblocked.`)) return;
         try {
             await db.collection("users").doc(uid).update({ blocked: true });
             await loadUsers();
-            showToast("User blocked successfully. Access denied.", "success");
+            showToast("User blocked. Access fully restricted.", "success");
         } catch (err) { showToast("Error: " + err.message, "error"); }
     };
     
     window.unblockUser = async function(uid) {
-        if (!confirm(`Unblock this user? They will regain access.`)) return;
+        if (!confirm(`Unblock user? They will regain full access.`)) return;
         try {
             await db.collection("users").doc(uid).update({ blocked: false });
             await loadUsers();
@@ -808,7 +830,7 @@
     };
     
     window.deleteUser = async function(uid) {
-        if (!confirm(`⚠️ Permanently delete user record? Auth account remains but Firestore data removed.`)) return;
+        if (!confirm(`⚠️ PERMANENT: Delete user data from Firestore? Auth account stays, but all stats removed.`)) return;
         try {
             await db.collection("users").doc(uid).delete();
             await loadUsers();
@@ -819,7 +841,7 @@
     window.updateCredits = async function() {
         const newCredits = parseInt(document.getElementById("editNewCredits").value);
         if (isNaN(newCredits) || newCredits < 0) {
-            document.getElementById("editModalError").textContent = "Valid non-negative credit required.";
+            document.getElementById("editModalError").textContent = "Valid non-negative credit amount required.";
             document.getElementById("editModalError").classList.remove("hidden");
             return;
         }
@@ -827,7 +849,7 @@
             await db.collection("users").doc(currentEditUserId).update({ credits: newCredits });
             closeEditModal();
             await loadUsers();
-            showToast("Credits updated!", "success");
+            showToast("Credits updated successfully!", "success");
         } catch (err) {
             document.getElementById("editModalError").textContent = "Error: " + err.message;
             document.getElementById("editModalError").classList.remove("hidden");
@@ -854,8 +876,8 @@
         const modalSuccess = document.getElementById("modalSuccessMsg");
         const createBtn = document.getElementById("createUserBtn");
         modalError.classList.add("hidden"); modalSuccess.classList.add("hidden");
-        if (!email || !password) { modalError.textContent = "Email and password required"; modalError.classList.remove("hidden"); return; }
-        if (password.length < 6) { modalError.textContent = "Password min 6 chars"; modalError.classList.remove("hidden"); return; }
+        if (!email || !password) { modalError.textContent = "Email and password are required."; modalError.classList.remove("hidden"); return; }
+        if (password.length < 6) { modalError.textContent = "Password must be at least 6 characters."; modalError.classList.remove("hidden"); return; }
         createBtn.disabled = true; createBtn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Creating...';
         try {
             const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
@@ -865,7 +887,7 @@
                 loginCount: 0, activeSessionCount: 0, lastDailyReset: firebase.firestore.FieldValue.serverTimestamp(),
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(), uid: uid
             });
-            modalSuccess.textContent = `✅ User ${email} created!`;
+            modalSuccess.textContent = `✅ User ${email} created successfully!`;
             modalSuccess.classList.remove("hidden");
             document.getElementById("newUserEmail").value = ""; document.getElementById("newUserPassword").value = "";
             await loadUsers();
@@ -902,7 +924,7 @@
         }
     };
     
-    window.manualLogout = async function() { if(confirm("Logout?")) await auth.signOut(); };
+    window.manualLogout = async function() { if(confirm("Logout from admin panel?")) await auth.signOut(); };
     
     auth.onAuthStateChanged(async (user) => {
         if (user) {
@@ -911,7 +933,7 @@
             document.getElementById("sessionStatus").innerHTML = `<i class="fas fa-check-circle"></i> ${user.email}`;
             await loadUsers();
             if (refreshInterval) clearInterval(refreshInterval);
-            refreshInterval = setInterval(async () => { if(auth.currentUser) await loadUsers(); }, 45000);
+            refreshInterval = setInterval(async () => { if(auth.currentUser) await loadUsers(); }, 50000);
         } else {
             document.getElementById("loginBox").classList.remove("hidden");
             document.getElementById("dashboard").classList.add("hidden");
@@ -924,9 +946,9 @@
         const toast = document.createElement("div");
         toast.className = type === "success" ? "success-toast" : "error-message";
         toast.textContent = msg;
-        toast.style.position = "fixed"; toast.style.bottom = "20px"; toast.style.right = "20px"; toast.style.zIndex = "1001";
+        toast.style.position = "fixed"; toast.style.bottom = "20px"; toast.style.right = "20px"; toast.style.zIndex = "1001"; toast.style.maxWidth = "320px";
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        setTimeout(() => toast.remove(), 3500);
     }
     
     window.openCreateUserModal = function() { document.getElementById("createUserModal").classList.remove("hidden"); document.getElementById("modalErrorMsg").classList.add("hidden"); document.getElementById("modalSuccessMsg").classList.add("hidden"); document.getElementById("createUserForm").reset(); document.getElementById("newUserCredits").value = "100"; document.getElementById("newUserDailyLimit").value = "30"; };
